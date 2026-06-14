@@ -1,0 +1,8 @@
+anthropic>=0.25.0
+paramiko>=3.4.0
+click>=8.1.0
+pyyaml>=6.0
+rich>=13.7.0
+prompt-toolkit>=3.0.0
+sqlmodel>=0.0.16
+cryptography>=42.0.0

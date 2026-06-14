@@ -1,0 +1,3 @@
+[console_scripts]
+vps = vibe_server.main:cli
+vps-dev = vibe_server.main:cli_dev

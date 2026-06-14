@@ -1,0 +1,33 @@
+Metadata-Version: 2.4
+Name: vibe-server
+Version: 0.1.0
+Summary: AI-Powered Conversational VPS Manager CLI
+License: MIT
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: anthropic>=0.25.0
+Requires-Dist: paramiko>=3.4.0
+Requires-Dist: click>=8.1.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: rich>=13.7.0
+Requires-Dist: prompt-toolkit>=3.0.0
+Requires-Dist: sqlmodel>=0.0.16
+Requires-Dist: cryptography>=42.0.0
+
+# vibe-server
+
+AI-Powered Conversational VPS Manager.
+
+## Features
+- Connect to any VPS via SSH.
+- Keep session logs and AI memory.
+- Conversational REPL using Anthropic Claude.
+- Built-in profiles for AWS, Hetzner, DO, etc.
+- Slash commands like `/mode`, `/diff`, `/memory`, etc.
+
+## Setup & Running
+```bash
+pip install -e .
+vps init
+vps connect
+```

@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qwerty"
+version = "0.1.0"
+description = "AI-Powered Conversational VPS Manager CLI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "anthropic>=0.25.0",
+    "paramiko>=3.4.0",
+    "click>=8.1.0",
+    "pyyaml>=6.0",
+    "rich>=13.7.0",
+    "prompt-toolkit>=3.0.0",
+    "sqlmodel>=0.0.16",
+    "cryptography>=42.0.0"
+]
+
+[project.scripts]
+vps = "cli.main:cli"
+vps-dev = "cli.main:cli_dev"

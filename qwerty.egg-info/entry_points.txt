@@ -1,0 +1,3 @@
+[console_scripts]
+vps = cli.main:cli
+vps-dev = cli.main:cli_dev
