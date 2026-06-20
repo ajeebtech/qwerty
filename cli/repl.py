@@ -14,6 +14,10 @@ from cli.db import session_log, memory
 from cli.modes import loader as mode_loader
 from cli.plugins import loader as plugin_loader
 from cli.auth import keychain
+from cli.context import assemble_context, generate_session_summary
+from cli.sync import run_sync
+from cli.db.brain import read_brain_file, list_brain_versions, diff_brain_versions, save_brain_version, write_brain_file, generate_server_brain, generate_project_brain
+from cli.db.file_tracker import get_last_version, list_versions, restore_version
 
 def capture_snapshot(ssh, server_name: str) -> dict:
     snapshot_data = {
@@ -218,22 +222,27 @@ class REPLSession:
             user=user,
             mode=self.active_mode_name
         )
+        if self.ssh:
+            self.ssh.session_id = self.db_session.id
+            self.ssh.server_name = self.server_name
 
     def run_loop(self):
         # API Key validation
         api_key = config.get_api_key()
         if not api_key:
-            display.status_warning("No Anthropic API key found.")
+            display.status_warning("No DeepSeek API key found.")
             # Prompt user
-            api_key = input("Please enter your ANTHROPIC_API_KEY: ").strip()
+            api_key = input("Please enter your DEEPSEEK_API_KEY: ").strip()
             if not api_key:
                 display.status_error("API key is required to run the AI pipeline.")
                 return
             # Save to config
             cfg = config.load_config()
-            cfg["anthropic_api_key"] = api_key
+            cfg["deepseek_api_key"] = api_key
             config.save_config(cfg)
-            display.status_success("Saved Anthropic API key to config.yaml.")
+            display.status_success("Saved DeepSeek API key to config.yaml.")
+        
+        self.api_key = api_key
 
         # Show banner
         display.show_banner(
@@ -253,7 +262,7 @@ class REPLSession:
             try:
                 # Prompt text
                 dry_suffix = " [dry-run]" if self.dry_run else ""
-                prompt_text = f"vps({self.server_name}:{self.active_mode_name}){dry_suffix}> "
+                prompt_text = f"❯ "
                 
                 user_input = prompt_session.prompt(prompt_text).strip()
                 if not user_input:
@@ -295,28 +304,49 @@ class REPLSession:
             return False
 
         if cmd == "/exit":
+            # Generate and store session summary before exiting
+            if self.db_session and self.conversation_history and getattr(self, "api_key", None):
+                display.status_info("Generating session summary...")
+                settings = session_log.get_all_settings(self.server_name)
+                model_name = settings.get("ai_model", "deepseek-chat")
+                summary = generate_session_summary(self.conversation_history, self.api_key, model_name)
+                if summary:
+                    session_log.update_session_summary(self.db_session.id, summary)
+                    display.status_success("Session summary saved.")
             return True
             
         elif cmd == "/help":
             display.status_info("Available slash commands:")
-            print("  /help                           Show this help screen")
-            print("  /servers                        List configured server profiles")
-            print("  /switch <name>                  Switch active server mid-session")
-            print("  /mode <name>                    Switch active mode (general/deploy/debug/monitor)")
-            print("  /history [n]                    Show last n commands (default 20)")
-            print("  /history search <term>          Full-text search command history")
-            print("  /replay <id>                    Re-run a command by database ID")
-            print("  /memory                         Show AI memories for this server")
-            print("  /memory set <key> <value>       Manually set an AI memory")
-            print("  /memory forget <key>            Forget an AI memory")
-            print("  /snapshot                       Capture a snapshot of the server now")
-            print("  /diff                           Show differences between current state and last snapshot")
-            print("  /note <text>                    Attach a note to the current session")
-            print("  /settings                       Show current settings")
-            print("  /set <key> <value>              Update a setting")
-            print("  /dry-run                        Toggle dry-run mode")
-            print("  /clear                          Reset local conversation context")
-            print("  /exit                           Disconnect and exit")
+            print("  /help                                 Show this help screen")
+            print("  /servers                              List configured server profiles")
+            print("  /switch <name>                        Switch active server mid-session")
+            print("  /mode <name>                          Switch active mode")
+            print("  /sync [--quick|--files|--memory]      Crawl server and update brain files")
+            print("  /sync --project <name>                Sync one project only")
+            print("  /sync --push                          Push current database data to the web dashboard")
+            print("  /brain [<project>]                    Show SERVER.md or project brain file")
+            print("  /brain diff [<v1> <v2>]               Diff brain versions")
+            print("  /brain history                        List all brain versions")
+            print("  /brain regen                          Force regenerate all brain files")
+            print("  /memory                               Show all memories for this server")
+            print("  /memory --category <cat>              Filter memories by category")
+            print("  /memory set <key> <value>             Manually set a memory")
+            print("  /memory forget <key>                  Forget a memory")
+            print("  /memory search <query>                Search memories by keyword")
+            print("  /memory clear                         Wipe all memories (destructive)")
+            print("  /undo                                 Undo the last file write")
+            print("  /undo --file <path> --version <n>     Restore a specific file version")
+            print("  /history [n]                          Show last n commands (default 20)")
+            print("  /history search <term>                Full-text search command history")
+            print("  /replay <id>                          Re-run a command by database ID")
+            print("  /snapshot                             Capture a server snapshot now")
+            print("  /diff                                 Diff current state vs last snapshot")
+            print("  /note <text>                          Attach a note to this session")
+            print("  /settings                             Show current settings")
+            print("  /set <key> <value>                    Update a setting")
+            print("  /dry-run                              Toggle dry-run mode")
+            print("  /clear                                Reset local conversation context")
+            print("  /exit                                 Disconnect and exit")
             
             # Print plugin commands if any
             plugin_cmds = list(self.plugin_registry.commands.keys())
@@ -413,6 +443,7 @@ class REPLSession:
                 confirm_all = session_log.get_setting("confirm_all", server_name=self.server_name, default=False)
                 if self.ssh:
                     self.ssh.log_color = session_log.get_setting("log_color", server_name=self.server_name, default="dim")
+                    self.ssh.current_user_prompt = f"/replay {cmd_id}"
                 out, code, ms = self.ssh.run(cmd_obj.command, was_dry_run=self.dry_run, confirm_all=confirm_all)
                 # Log to DB
                 if self.db_session:
@@ -439,22 +470,170 @@ class REPLSession:
                 key = args[1]
                 val = " ".join(args[2:])
                 memory.set_memory(self.server_name, key, val, source="user_set")
-                display.status_success(f"Set AI memory '{key}' to '{val}'")
+                display.status_success(f"Set memory '{key}' = '{val}'  [user_set — protected]")
             elif args and args[0] == "forget":
                 if len(args) < 2:
                     display.status_warning("Usage: /memory forget <key>")
                     return False
                 key = args[1]
                 if memory.forget_memory(self.server_name, key):
-                    display.status_success(f"Forgot AI memory '{key}'")
+                    display.status_success(f"Forgot memory '{key}'")
                 else:
-                    display.status_warning(f"AI memory key '{key}' not found.")
+                    display.status_warning(f"Memory key '{key}' not found.")
+            elif args and args[0] == "search":
+                if len(args) < 2:
+                    display.status_warning("Usage: /memory search <query>")
+                    return False
+                query = " ".join(args[1:])
+                results = memory.search_memories(self.server_name, query)
+                display.status_info(f"Memory search results for '{query}':")
+                for m in results:
+                    cat = f"[{m.category}] " if m.category else ""
+                    print(f"  {cat}{m.key} = {m.value}  (src:{m.source})")
+            elif args and args[0] == "clear":
+                confirm = input("  Wipe ALL memories for this server? [y/N]: ").strip().lower()
+                if confirm == "y":
+                    memory.clear_memories(self.server_name)
+                    display.status_success("All memories cleared.")
+                else:
+                    display.status_warning("Cancelled.")
+            elif args and args[0] == "--category":
+                if len(args) < 2:
+                    display.status_warning("Usage: /memory --category <category>")
+                    return False
+                cat = args[1]
+                mems = memory.list_memories(self.server_name, category=cat)
+                display.status_info(f"Memories [{cat}] for '{self.server_name}':")
+                for m in mems:
+                    print(f"  {m.key} = {m.value}  (conf:{m.confidence:.1f} src:{m.source})")
             else:
                 mems = memory.list_memories(self.server_name)
-                display.status_info(f"AI memory facts for server '{self.server_name}':")
-                for m in mems:
-                    print(f"  {m.key} = {m.value} (source: {m.source})")
+                display.status_info(f"All memories for '{self.server_name}' ({len(mems)} total):")
+                current_cat = None
+                for m in sorted(mems, key=lambda x: (x.category or "", x.key)):
+                    if m.category != current_cat:
+                        current_cat = m.category
+                        print(f"\n  [{current_cat or 'uncategorized'}]")
+                    print(f"    {m.key} = {m.value}  (src:{m.source} conf:{m.confidence:.1f} accessed:{m.times_accessed}x)")
                     
+        elif cmd == "/sync":
+            if not self.ssh:
+                display.status_error("Not connected to a server.")
+                return False
+            if "--push" in args:
+                from cli.sync import push_to_cloud
+                push_to_cloud(self.server_name)
+                return True
+            settings = session_log.get_all_settings(self.server_name)
+            model_name = settings.get("ai_model", "deepseek-chat")
+            quick = "--quick" in args
+            only_files = "--files" in args
+            only_memory = "--memory" in args
+            only_project = None
+            if "--project" in args:
+                idx = args.index("--project")
+                if idx + 1 < len(args):
+                    only_project = args[idx + 1]
+            run_sync(
+                server_name=self.server_name,
+                ssh=self.ssh,
+                ai_api_key=self.api_key,
+                model_name=model_name,
+                quick=quick,
+                only_project=only_project,
+                only_files=only_files,
+                only_memory=only_memory
+            )
+
+        elif cmd == "/brain":
+            if not args or (len(args) == 1 and not args[0].startswith("-")):
+                # Show brain file
+                project_name = args[0] if args else None
+                content = read_brain_file(self.server_name, project_name)
+                if content:
+                    print(content)
+                else:
+                    name = f"{project_name}.md" if project_name else "SERVER.md"
+                    display.status_warning(f"No brain file found for {name}. Run /sync first.")
+            elif args[0] == "diff":
+                # /brain diff [v1 v2]
+                project_name = None
+                try:
+                    v1 = int(args[1]) if len(args) > 1 else None
+                    v2 = int(args[2]) if len(args) > 2 else None
+                except (ValueError, IndexError):
+                    v1 = v2 = None
+                versions = list_brain_versions(self.server_name, project_name)
+                if not versions:
+                    display.status_warning("No brain versions found. Run /sync first.")
+                elif v1 and v2:
+                    print(diff_brain_versions(self.server_name, v1, v2, project_name))
+                elif len(versions) >= 2:
+                    sorted_v = sorted(versions, key=lambda v: v.version_number)
+                    print(diff_brain_versions(self.server_name, sorted_v[-2].version_number, sorted_v[-1].version_number, project_name))
+                else:
+                    display.status_warning("Need at least 2 versions to diff.")
+            elif args[0] == "history":
+                versions = list_brain_versions(self.server_name)
+                display.status_info(f"Brain versions for {self.server_name}:")
+                for v in sorted(versions, key=lambda x: x.version_number, reverse=True):
+                    proj = v.project_name or "SERVER"
+                    print(f"  v{v.version_number}  [{proj}]  {v.trigger}  {v.created_at.strftime('%Y-%m-%d %H:%M')}")
+            elif args[0] == "regen":
+                display.status_info("Regenerating brain files from stored data...")
+                content = generate_server_brain(self.server_name)
+                v = save_brain_version(self.server_name, content, trigger="manual")
+                write_brain_file(self.server_name, content)
+                display.status_success(f"SERVER.md regenerated (v{v})")
+
+        elif cmd == "/undo":
+            if not self.ssh:
+                display.status_error("Not connected to a server.")
+                return False
+            # Parse optional --file and --version flags
+            undo_path = None
+            undo_version = None
+            if "--file" in args:
+                idx = args.index("--file")
+                if idx + 1 < len(args):
+                    undo_path = args[idx + 1]
+            if "--version" in args:
+                idx = args.index("--version")
+                if idx + 1 < len(args):
+                    try:
+                        undo_version = int(args[idx + 1])
+                    except ValueError:
+                        display.status_error("Version must be a number.")
+                        return False
+            # Find the version to restore
+            if undo_path and undo_version:
+                fv = None
+                from cli.db.file_tracker import get_version
+                fv = get_version(self.server_name, undo_path, undo_version)
+            else:
+                fv = get_last_version(self.server_name, undo_path)
+            if not fv:
+                display.status_warning("No file version found to undo.")
+                return False
+            # Show what will be restored
+            print(f"  last change: {fv.file_path}")
+            print(f"  changed: {fv.changed_at.strftime('%Y-%m-%d %H:%M')} | version {fv.version_number}")
+            if fv.change_reason:
+                print(f"  reason: {fv.change_reason}")
+            confirm = input(f"  Restore version {fv.version_number - 1}? [y/N]: ").strip().lower()
+            if confirm != "y":
+                display.status_warning("Cancelled.")
+                return False
+            success, msg = restore_version(
+                self.server_name, fv.file_path,
+                fv.version_number, self.ssh,
+                session_id=self.db_session.id if self.db_session else None
+            )
+            if success:
+                display.status_success(msg)
+            else:
+                display.status_error(msg)
+
         elif cmd == "/snapshot":
             display.status_info("Capturing snapshot...")
             snap_data = capture_snapshot(self.ssh, self.server_name)
@@ -528,30 +707,28 @@ class REPLSession:
         return False
 
     def execute_ai_turn(self, user_prompt: str, api_key: str):
+        import time
+        turn_start_time = time.time()
         # 1. Fetch relevant system settings and overlays
         settings = session_log.get_all_settings(self.server_name)
         if self.ssh:
             self.ssh.log_color = settings.get("log_color", "dim")
+            self.ssh.current_user_prompt = user_prompt
         mode_overlay = self.modes[self.active_mode_name].get_overlay()
         
         hoster = self.profile.get("hoster")
         from cli.modes.hoster import get_hoster_overlay
         hoster_overlay = get_hoster_overlay(hoster)
         
-        # Load snapshots context
-        latest_snap = session_log.get_latest_snapshot(self.server_name)
-        snapshot_ctx = latest_snap.raw_context if latest_snap else None
-        
-        # Load AI memory
-        mems = memory.list_memories(self.server_name)
+        # Assemble brain context using the context assembler
+        brain_ctx = assemble_context(self.server_name)
         
         # Assemble system prompt
         system_prompt = ai.assemble_system_prompt(
             mode_overlay=mode_overlay,
             hoster_overlay=hoster_overlay,
-            snapshot_context=snapshot_ctx,
-            memories=mems,
-            settings=settings
+            settings=settings,
+            brain_context=brain_ctx
         )
         
         # Format user prompt and add to context
@@ -562,101 +739,108 @@ class REPLSession:
             
         self.conversation_history.append({"role": "user", "content": formatted_prompt})
         
-        # 2. Call AI Pipeline
-        display.status_info("Asking Claude for plan...")
-        model_name = settings.get("ai_model", "claude-sonnet-4-6")
-        try:
-            parsed_response = ai.call_ai_pipeline(
-                api_key=api_key,
-                system_prompt=system_prompt,
-                messages=self.conversation_history,
-                show_stream=True,
-                model_name=model_name
-            )
-        except Exception as e:
-            display.status_error(f"AI Pipeline failed: {e}")
-            # Remove last user message since it failed
-            self.conversation_history.pop()
-            return
-            
-        # Parse output plan
-        plan = parsed_response.get("plan", [])
-        warnings = parsed_response.get("warnings", [])
-        follow_up = parsed_response.get("follow_up")
-        memories_to_process = parsed_response.get("memories", [])
-        
-        # Show warnings
-        if warnings:
-            for w in warnings:
-                display.status_warning(w)
-                
-        # Show planning narration is already printed via streaming in call_ai_pipeline
-        # 3. Execute plan commands
-        outputs_context = []
-        confirm_all = settings.get("confirm_all", False)
-        
-        for p in plan:
-            desc = p.get("description", "Executing command")
-            cmd = p.get("command", "").strip()
-            if not cmd:
-                continue
-                
-            display.status_info(f"Action: {desc}")
-            out, code, ms = self.ssh.run(cmd, was_dry_run=self.dry_run, confirm_all=confirm_all)
-            
-            # Log executed command
-            if self.db_session:
-                self.command_count += 1
-                session_log.log_command(
-                    session_id=self.db_session.id,
-                    server_name=self.server_name,
-                    command=cmd,
-                    description=desc,
-                    output=out,
-                    exit_code=code,
-                    duration_ms=ms,
-                    was_dry_run=self.dry_run,
-                    user_prompt=user_prompt
+        # 2. Loop for autonomous iteration
+        max_iterations = 5
+        for iteration in range(max_iterations):
+            display.status_info("Thinking...")
+            model_name = settings.get("ai_model", "deepseek-chat")
+            try:
+                parsed_response = ai.call_ai_pipeline(
+                    api_key=api_key,
+                    system_prompt=system_prompt,
+                    messages=self.conversation_history,
+                    show_stream=True,
+                    model_name=model_name
                 )
+            except Exception as e:
+                display.status_error(f"AI Pipeline failed: {e}")
+                # Remove last user message since it failed
+                self.conversation_history.pop()
+                return
                 
-            # Cap command output inside context window management
-            cap_limit = 3000
-            if len(out) > cap_limit:
-                out_capped = out[:cap_limit] + f"\n... [Output truncated to {cap_limit} chars]"
+            # Parse output plan
+            plan = parsed_response.get("plan", [])
+            warnings = parsed_response.get("warnings", [])
+            follow_up = parsed_response.get("follow_up")
+            memories_to_process = parsed_response.get("memories", [])
+            
+            # Show warnings
+            if warnings:
+                for w in warnings:
+                    display.status_warning(w)
+                    
+            if not plan:
+                # No commands to execute, the AI is done with its autonomous loop
+                break
+                
+            # 3. Execute plan commands
+            outputs_context = []
+            confirm_all = settings.get("confirm_all", False)
+            
+            for p in plan:
+                desc = p.get("description", "Executing command")
+                cmd = p.get("command", "").strip()
+                if not cmd:
+                    continue
+                    
+                display.status_info(f"Action: {desc}")
+                out, code, ms = self.ssh.run(cmd, was_dry_run=self.dry_run, confirm_all=confirm_all)
+                
+                # Log executed command
+                if self.db_session:
+                    self.command_count += 1
+                    session_log.log_command(
+                        session_id=self.db_session.id,
+                        server_name=self.server_name,
+                        command=cmd,
+                        description=desc,
+                        output=out,
+                        exit_code=code,
+                        duration_ms=ms,
+                        was_dry_run=self.dry_run,
+                        user_prompt=user_prompt
+                    )
+                    
+                # Cap command output inside context window management
+                cap_limit = 3000
+                if len(out) > cap_limit:
+                    out_capped = out[:cap_limit] + f"\n... [Output truncated to {cap_limit} chars]"
+                else:
+                    out_capped = out
+                    
+                outputs_context.append(f"Command: {cmd}\nExit Code: {code}\nOutput:\n{out_capped}")
+                
+            # 4. Process AI memories
+            for m in memories_to_process:
+                action = m.get("action", "").lower()
+                key = m.get("key")
+                value = m.get("value", "")
+                if key:
+                    if action == "set":
+                        memory.set_memory(self.server_name, key, value, source="ai_inferred")
+                        display.status_info(f"AI auto-remembered: {key} = {value}")
+                    elif action == "forget":
+                        if memory.forget_memory(self.server_name, key):
+                            display.status_info(f"AI auto-forgot: {key}")
+                            
+            # 5. Inject feedback of executions back into assistant response context
+            assistant_plan_content = f"Plan: {json.dumps(plan, indent=2)}\nNarration: {parsed_response.get('narration', '')}"
+            self.conversation_history.append({"role": "assistant", "content": assistant_plan_content})
+            
+            if outputs_context:
+                user_feedback = "Executed planned commands. Outputs:\n" + "\n".join(outputs_context)
             else:
-                out_capped = out
+                user_feedback = "No commands were executed."
                 
-            outputs_context.append(f"Command: {cmd}\nExit Code: {code}\nOutput:\n{out_capped}")
-            
-        # 4. Process AI memories
-        for m in memories_to_process:
-            action = m.get("action", "").lower()
-            key = m.get("key")
-            value = m.get("value", "")
-            if key:
-                if action == "set":
-                    memory.set_memory(self.server_name, key, value, source="ai_inferred")
-                    display.status_info(f"AI auto-remembered: {key} = {value}")
-                elif action == "forget":
-                    if memory.forget_memory(self.server_name, key):
-                        display.status_info(f"AI auto-forgot: {key}")
-                        
-        # 5. Inject feedback of executions back into assistant response context
-        # First, append the plan and narration to the history as an assistant message
-        assistant_plan_content = f"Plan: {json.dumps(plan, indent=2)}\nNarration: {parsed_response.get('narration', '')}"
-        self.conversation_history.append({"role": "assistant", "content": assistant_plan_content})
-        
-        # Second, append the execution results as a user message
-        if outputs_context:
-            user_feedback = "Executed planned commands. Outputs:\n" + "\n".join(outputs_context)
-        else:
-            user_feedback = "No commands were executed."
-            
-        if follow_up:
-            user_feedback += f"\nFollow up suggestion: {follow_up}"
-            display.status_info(f"Follow up: {follow_up}")
-            
-        self.conversation_history.append({"role": "user", "content": user_feedback})
+            if follow_up:
+                user_feedback += f"\nFollow up suggestion: {follow_up}"
+                display.status_info(f"Follow up: {follow_up}")
+                
+            # Check if we should iterate again
+            if iteration < max_iterations - 1:
+                user_feedback += "\n\nYou may now plan your next commands based on this output, or if you are done, provide an empty plan."
+                
+            self.conversation_history.append({"role": "user", "content": user_feedback})
         
         # 6. Stream final concise natural language answer to the user
         print() # Print space before final output
@@ -677,6 +861,11 @@ class REPLSession:
             self.conversation_history.append({"role": "assistant", "content": final_summary})
         except Exception as e:
             display.status_error(f"Failed to fetch final summary: {e}")
+            return f"Error getting final summary: {e}"
+            
+        elapsed = time.time() - turn_start_time
+        display.status_info(f"Crunched for {elapsed:.1f}s")
+        return final_summary
 
     def disconnect(self):
         # Save session logs

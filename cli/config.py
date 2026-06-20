@@ -7,7 +7,7 @@ CONFIG_PATH = CONFIG_DIR / "config.yaml"
 
 DEFAULT_CONFIG = {
     "default_server": None,
-    "anthropic_api_key": None,
+    "deepseek_api_key": None,
     "servers": {}
 }
 
@@ -84,8 +84,8 @@ def remove_server(name: str):
         raise ValueError(f"Server profile '{name}' not found.")
 
 def get_api_key() -> str | None:
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    api_key = os.environ.get("DEEPSEEK_API_KEY")
     if api_key:
         return api_key
     config = load_config()
-    return config.get("anthropic_api_key")
+    return config.get("deepseek_api_key")

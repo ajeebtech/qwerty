@@ -26,18 +26,40 @@ export default function Home() {
   const [snapshots, setSnapshots] = useState([]);
 
   useEffect(() => {
-    // Hydrate state from localStorage
-    const getStored = (key, defaultValue) => {
-      const data = localStorage.getItem(`qwerty_${key}`);
-      return data ? JSON.parse(data) : defaultValue;
-    };
+    async function loadCloudData() {
+      try {
+        const res = await fetch("/api/data");
+        const cloudData = await res.json();
+        if (cloudData.configured) {
+          setServers(cloudData.servers);
+          setSettings(cloudData.settings);
+          setMemories(cloudData.memories);
+          setSessions(cloudData.sessions);
+          setCommands(cloudData.commands);
+          setSnapshots(cloudData.snapshots);
+          setIsMounted(true);
+          return;
+        }
+      } catch (e) {
+        console.error("Failed to fetch cloud database:", e);
+      }
 
-    setServers(getStored("servers", INITIAL_SERVERS));
-    setSettings(getStored("settings", INITIAL_SETTINGS));
-    setMemories(getStored("memory", INITIAL_AI_MEMORY));
-    setSessions(getStored("sessions", INITIAL_SESSIONS));
-    setCommands(getStored("commands", INITIAL_COMMANDS));
-    setSnapshots(getStored("snapshots", INITIAL_SNAPSHOTS));
+      // Fallback to localStorage if cloud DB is not configured or fails
+      const getStored = (key, defaultValue) => {
+        const data = localStorage.getItem(`qwerty_${key}`);
+        return data ? JSON.parse(data) : defaultValue;
+      };
+
+      setServers(getStored("servers", INITIAL_SERVERS));
+      setSettings(getStored("settings", INITIAL_SETTINGS));
+      setMemories(getStored("memory", INITIAL_AI_MEMORY));
+      setSessions(getStored("sessions", INITIAL_SESSIONS));
+      setCommands(getStored("commands", INITIAL_COMMANDS));
+      setSnapshots(getStored("snapshots", INITIAL_SNAPSHOTS));
+      setIsMounted(true);
+    }
+
+    loadCloudData();
 
     // Subdomain routing detection
     if (typeof window !== "undefined") {
@@ -48,34 +70,33 @@ export default function Home() {
         setCurrentDomain("website.com");
       }
     }
-
-    setIsMounted(true);
   }, []);
 
-  // Sync to LocalStorage on updates
-  useEffect(() => { 
-    if (isMounted) localStorage.setItem("qwerty_servers", JSON.stringify(servers)); 
-  }, [servers, isMounted]);
-  
-  useEffect(() => { 
-    if (isMounted) localStorage.setItem("qwerty_settings", JSON.stringify(settings)); 
-  }, [settings, isMounted]);
+  // Sync to LocalStorage and Cloud Database on updates
+  useEffect(() => {
+    if (!isMounted) return;
+    
+    // Save to local storage anyway as cache/offline copy
+    localStorage.setItem("qwerty_servers", JSON.stringify(servers));
+    localStorage.setItem("qwerty_settings", JSON.stringify(settings));
+    localStorage.setItem("qwerty_memory", JSON.stringify(memories));
+    localStorage.setItem("qwerty_sessions", JSON.stringify(sessions));
+    localStorage.setItem("qwerty_commands", JSON.stringify(commands));
+    localStorage.setItem("qwerty_snapshots", JSON.stringify(snapshots));
 
-  useEffect(() => { 
-    if (isMounted) localStorage.setItem("qwerty_memory", JSON.stringify(memories)); 
-  }, [memories, isMounted]);
-
-  useEffect(() => { 
-    if (isMounted) localStorage.setItem("qwerty_sessions", JSON.stringify(sessions)); 
-  }, [sessions, isMounted]);
-
-  useEffect(() => { 
-    if (isMounted) localStorage.setItem("qwerty_commands", JSON.stringify(commands)); 
-  }, [commands, isMounted]);
-
-  useEffect(() => { 
-    if (isMounted) localStorage.setItem("qwerty_snapshots", JSON.stringify(snapshots)); 
-  }, [snapshots, isMounted]);
+    // Async push to backend cloud database if active
+    fetch("/api/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessions,
+        commands,
+        memories,
+        settings,
+        snapshots
+      })
+    }).catch(err => console.log("Cloud sync skipped/failed:", err));
+  }, [servers, settings, memories, sessions, commands, snapshots, isMounted]);
 
   if (!isMounted) {
     return (

@@ -5,7 +5,7 @@ Summary: AI-Powered Conversational VPS Manager CLI
 License: MIT
 Requires-Python: >=3.10
 Description-Content-Type: text/markdown
-Requires-Dist: anthropic>=0.25.0
+Requires-Dist: openai>=1.0.0
 Requires-Dist: paramiko>=3.4.0
 Requires-Dist: click>=8.1.0
 Requires-Dist: pyyaml>=6.0
@@ -13,21 +13,21 @@ Requires-Dist: rich>=13.7.0
 Requires-Dist: prompt-toolkit>=3.0.0
 Requires-Dist: sqlmodel>=0.0.16
 Requires-Dist: cryptography>=42.0.0
+Requires-Dist: textual>=0.50.0
 
-# vibe-server
+qwerty is an open source tool to vibe-manage VPS for computes, backends serving as ai agents and more.
 
-AI-Powered Conversational VPS Manager.
+## Use Cases
+
+- **Backends & APIs**: Host Nginx, FastAPI, Django, or Node.js applications with PM2/systemd process management.
+- **Compute & AI Nodes**: Run ML inference engines (Ollama, vLLM), database servers, or custom script workers.
+- **AI Agents & Bots**: Run persistent autonomous agents, background scraping scripts, or Telegram/Discord bots.
+- **Development & CI/CD**: Deploy staging environments, remote development boxes, or self-hosted pipeline runners.
 
 ## Features
+
 - Connect to any VPS via SSH.
 - Keep session logs and AI memory.
 - Conversational REPL using Anthropic Claude.
 - Built-in profiles for AWS, Hetzner, DO, etc.
 - Slash commands like `/mode`, `/diff`, `/memory`, etc.
-
-## Setup & Running
-```bash
-pip install -e .
-vps init
-vps connect
-```

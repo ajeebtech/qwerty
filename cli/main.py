@@ -23,16 +23,16 @@ def init():
     display.status_info("Initializing qwerty configuration...")
     cfg = config.load_config()
     
-    # 1. Ask for Anthropic API Key
+    # 1. Ask for DeepSeek API Key
     api_key = config.get_api_key()
     if not api_key:
-        api_key = click.prompt("Enter your ANTHROPIC_API_KEY", default="", show_default=False).strip()
+        api_key = click.prompt("Enter your DEEPSEEK_API_KEY", default="", show_default=False).strip()
         if api_key:
-            cfg["anthropic_api_key"] = api_key
+            cfg["deepseek_api_key"] = api_key
             config.save_config(cfg)
-            display.status_success("Saved Anthropic API Key.")
+            display.status_success("Saved DeepSeek API Key.")
         else:
-            display.status_warning("No API key entered. You can set it in ANTHROPIC_API_KEY env var later.")
+            display.status_warning("No API key entered. You can set it in DEEPSEEK_API_KEY env var later.")
             
     # 2. Ask to initialize credential vault
     if not vault.is_vault_initialized():

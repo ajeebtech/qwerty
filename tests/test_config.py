@@ -16,7 +16,7 @@ def mock_config_paths(tmp_path):
 def test_load_config_default():
     cfg = config.load_config()
     assert cfg["default_server"] is None
-    assert cfg["anthropic_api_key"] is None
+    assert cfg["deepseek_api_key"] is None
     assert cfg["servers"] == {}
 
 def test_add_and_get_server_profile():
@@ -51,12 +51,12 @@ def test_set_default_server():
     assert config.get_default_server() == "s2"
 
 def test_get_api_key_override():
-    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "env_key"}):
+    with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "env_key"}):
         assert config.get_api_key() == "env_key"
         
     # Test fallback to config file
     with patch.dict(os.environ, {}, clear=True):
         cfg = config.load_config()
-        cfg["anthropic_api_key"] = "file_key"
+        cfg["deepseek_api_key"] = "file_key"
         config.save_config(cfg)
         assert config.get_api_key() == "file_key"

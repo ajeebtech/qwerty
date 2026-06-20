@@ -10,7 +10,10 @@ def mock_db_engine():
     test_engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False})
     with patch("cli.db.models.get_engine", return_value=test_engine), \
          patch("cli.db.session_log.get_engine", return_value=test_engine), \
-         patch("cli.db.memory.get_engine", return_value=test_engine):
+         patch("cli.db.memory.get_engine", return_value=test_engine), \
+         patch("cli.db.brain.get_engine", return_value=test_engine), \
+         patch("cli.db.file_tracker.get_engine", return_value=test_engine), \
+         patch("cli.context.get_engine", return_value=test_engine):
         models.init_db()
         yield test_engine
 
@@ -79,3 +82,14 @@ def test_repl_execute_ai_turn(mock_profile, mock_ssh_cls):
         
         assert history[3]["role"] == "assistant"
         assert history[3]["content"] == "This is a summary response."
+
+@patch("urllib.request.urlopen")
+def test_push_to_cloud(mock_urlopen):
+    # Mock urllib response
+    mock_response = MagicMock()
+    mock_response.read.return_value = b'{"success": true}'
+    mock_urlopen.return_value.__enter__.return_value = mock_response
+
+    from cli.sync import push_to_cloud
+    success = push_to_cloud("dev-vps")
+    assert success is True

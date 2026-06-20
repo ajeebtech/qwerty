@@ -14,7 +14,9 @@ def mock_db_engine():
     
     with patch("cli.db.models.get_engine", return_value=test_engine), \
          patch("cli.db.session_log.get_engine", return_value=test_engine), \
-         patch("cli.db.memory.get_engine", return_value=test_engine):
+         patch("cli.db.memory.get_engine", return_value=test_engine), \
+         patch("cli.db.brain.get_engine", return_value=test_engine), \
+         patch("cli.db.file_tracker.get_engine", return_value=test_engine):
         models.init_db()
         yield test_engine
 

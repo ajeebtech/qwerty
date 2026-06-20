@@ -55,13 +55,13 @@ export default function ConsoleDashboard({
   const currentServerObj = servers.find(s => s.name === activeServer);
   const globalLogColor = settings.find(s => s.server_name === null && s.key === "log_color")?.value || "#818cf8";
   const serverLogColor = settings.find(s => s.server_name === activeServer && s.key === "log_color")?.value || globalLogColor;
-  const anthropicKey = settings.find(s => s.server_name === null && s.key === "anthropic_api_key")?.value || "";
+  const deepseekKey = settings.find(s => s.server_name === null && s.key === "deepseek_api_key")?.value || "";
   const preferredWebServer = settings.find(s => s.server_name === null && s.key === "preferred_web_server")?.value || "nginx";
   const preferredEditor = settings.find(s => s.server_name === null && s.key === "preferred_editor")?.value || "vim";
 
   // Temporary Settings Edit Form State
   const [tempLogColor, setTempLogColor] = useState(serverLogColor);
-  const [tempApiKey, setTempApiKey] = useState(anthropicKey);
+  const [tempApiKey, setTempApiKey] = useState(deepseekKey);
   const [tempWebServer, setTempWebServer] = useState(preferredWebServer);
   const [tempEditor, setTempEditor] = useState(preferredEditor);
 
@@ -175,11 +175,11 @@ export default function ConsoleDashboard({
     let updatedSettings = [...settings];
 
     // Handle global API Key
-    const apiKeyIdx = updatedSettings.findIndex(s => s.server_name === null && s.key === "anthropic_api_key");
+    const apiKeyIdx = updatedSettings.findIndex(s => s.server_name === null && s.key === "deepseek_api_key");
     if (apiKeyIdx >= 0) {
       updatedSettings[apiKeyIdx].value = tempApiKey;
     } else {
-      updatedSettings.push({ server_name: null, key: "anthropic_api_key", value: tempApiKey });
+      updatedSettings.push({ server_name: null, key: "deepseek_api_key", value: tempApiKey });
     }
 
     // Handle global Web Server
@@ -802,7 +802,7 @@ export default function ConsoleDashboard({
                 <h3 className="settings-title">Global CLI Settings</h3>
                 <form onSubmit={handleSaveSettings}>
                   <div className="settings-input-group">
-                    <label className="settings-label">Anthropic API Key</label>
+                    <label className="settings-label">DeepSeek API Key</label>
                     <input 
                       type="password" 
                       className="settings-input" 
